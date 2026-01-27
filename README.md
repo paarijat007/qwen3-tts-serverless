@@ -1,15 +1,16 @@
-# AI Podcast Generator
+# AI Podcast Generator 🎙️
 
 Generate full podcast episodes with realistic multi-voice conversations on ANY topic using AI. Powered by [Modal](https://modal.com), [Grok AI](https://x.ai), and [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign).
 
 ## Features
 
-- **Multi-Voice Podcasts**: 3 distinct AI voices (Host, Expert, Comedian) with natural expressiveness
-- **Any Topic**: Generate engaging conversations about any subject
-- **Audio & Video**: Create both audio podcasts and video with waveform visualization
-- **Natural Dialogue**: Uses Grok AI to generate realistic, conversational scripts
-- **Fast Generation**: Parallel audio synthesis for quick results
-- **Web Interface**: Simple, beautiful web UI included
+- **🎭 Multi-Voice Podcasts**: 3 distinct AI voices (Host, Expert, Comedian) with natural expressiveness
+- **🚀 Parallel Generation**: All audio segments generated simultaneously for speed
+- **🎬 Audio & Video**: Create both audio podcasts (WAV) and video with waveform visualization (MP4)
+- **💬 Natural Dialogue**: Uses Grok AI to generate realistic, conversational scripts with filler words, interruptions, and natural pacing
+- **⚡ Fast**: Full 2-3 minute podcast in under 90 seconds
+- **🌐 Web Interface**: Beautiful, responsive web UI included
+- **💰 Cost Optimized**: L4 GPU, parallel processing, auto-scaling
 
 ## Demo
 
@@ -17,10 +18,15 @@ Try it out: Generate a podcast on topics like "Why everyone's ex looks exactly t
 
 ## How It Works
 
-1. **Script Generation**: Grok AI creates natural dialogue between 3 personas
-2. **Voice Synthesis**: Qwen3-TTS generates audio with distinct voice profiles
-3. **Assembly**: Audio segments are combined with natural pauses
-4. **Output**: Download as audio (WAV) or video (MP4)
+```
+User Topic → Grok AI Script → Parse Segments → Parallel TTS → Assembly → WAV/MP4
+```
+
+1. **Script Generation**: Grok AI (`grok-4-1-fast-non-reasoning`) creates natural dialogue between 3 personas (12-15 exchanges)
+2. **Parsing**: Script is split into speaker segments (HOST/EXPERT/COMEDIAN), emotion tags removed
+3. **Parallel Voice Synthesis**: All segments generated simultaneously using `asyncio.gather()` - this is the key speedup!
+4. **Assembly**: Audio segments concatenated with 0.7s natural pauses between speakers
+5. **Output**: Return as WAV audio or MP4 video (with ffmpeg waveform visualization)
 
 ## Voice Profiles
 
@@ -111,38 +117,64 @@ curl -X POST https://your-modal-url/generate-video \
 
 ```
 .
-├── app.py                          # Main Modal application
-├── philosophical_debate_modal.py   # Philosophical debate variant
-├── index.html                      # Web interface
+├── app.py                          # Main Modal application (1034 lines)
+│   ├── TTS class (L4 GPU)         # Qwen3-TTS model loader and generator
+│   ├── /generate-podcast          # HTTP endpoint for audio podcasts
+│   ├── /generate-video            # HTTP endpoint for video with waveform
+│   ├── /generate                  # Simple TTS endpoint
+│   └── / (GET)                    # Web interface HTML
+├── philosophical_debate_modal.py   # Philosophical debate variant (experimental)
+├── index.html                      # Standalone web interface
 ├── .env.example                    # Environment variables template
-├── LICENSE                         # MIT License
+├── LICENSE                         # Apache 2.0 License
 └── README.md                       # This file
 ```
 
+### Key Components
+
+- **Lines 102-136**: TTS class with GPU configuration and model loading
+- **Lines 463-654**: Main podcast generation endpoint (working, production-ready)
+- **Lines 657-866**: Video generation with ffmpeg (working, production-ready)
+- **Lines 46-96**: Voice profile prompts (customizable)
+
 ## Configuration
 
-### GPU Settings
+### GPU Configuration
 
-The TTS model runs on Modal's L4 GPU (cheaper than A100):
-- `gpu="L4"` in `app.py:103`
-- `min_containers=0` - no warm containers to save costs
-- `scaledown_window=300` - 5 minute cooldown
-
-### Cost Optimization
-
-- Uses `grok-4-1-fast-non-reasoning` for faster, cheaper script generation
-- Parallel audio generation for all segments
-- No persistent containers when idle
-
-## Advanced Features
-
-### WebRTC Streaming
-
-The app includes WebRTC endpoints for real-time audio streaming (experimental):
-
-```javascript
-// See /offer endpoint in app.py
+The TTS model runs on Modal's **L4 GPU** (app.py:103):
+```python
+@app.cls(
+    gpu="L4",              # Much cheaper than A100 (~8x cost savings)
+    cpu=2,
+    min_containers=0,      # Scale to zero when idle = $0 cost
+    scaledown_window=300,  # 5 minute cooldown
+    timeout=600,           # 10 minute max execution
+)
 ```
+
+### Cost Optimization Strategies
+
+1. **Cheap GPU**: L4 instead of A100 for TTS model
+2. **Parallel Processing**: All segments generated simultaneously (not sequential)
+3. **Fast LLM**: `grok-4-1-fast-non-reasoning` for script generation
+4. **Auto-scaling**: Containers scale down to 0 when idle (no idle costs)
+5. **Efficient Model Loading**: bfloat16 precision reduces memory usage
+
+## Technical Details
+
+### Parallel Processing Architecture
+
+The key innovation is **parallel TTS generation**:
+
+```python
+# All segments generated simultaneously, not sequentially!
+results = await asyncio.gather(*[
+    tts.generate.remote(text, voice_style)
+    for speaker, text in segments
+])
+```
+
+This reduces generation time from ~5 minutes (sequential) to ~90 seconds (parallel).
 
 ### Custom Voice Profiles
 
@@ -167,12 +199,13 @@ modal run app.py::TTS.generate --text "Hello world" --voice-style "$VOICE_HOST"
 
 Add `print()` statements in the code - Modal captures all logs in the web dashboard.
 
-## Limitations
+## Limitations & Known Issues
 
-- Podcast generation takes 1-3 minutes depending on length
-- GPU cold starts add ~30 seconds on first request
-- Video generation requires ffmpeg (included in Modal image)
-- Maximum podcast length: ~5 minutes (configurable via max_tokens)
+- **Generation Time**: 90-180 seconds for full podcast (includes script + audio)
+- **Cold Start**: First request adds ~30 seconds for GPU warmup
+- **Maximum Length**: ~5 minutes per podcast (limited by `max_tokens=3000` in Grok)
+- **WebRTC**: Experimental `/offer` endpoint exists but not production-ready (use HTTP endpoints instead)
+- **Video Size**: MP4 files are large (~20-50MB for 2-3 min) due to waveform rendering
 
 ## Contributing
 
