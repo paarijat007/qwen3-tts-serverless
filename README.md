@@ -12,9 +12,26 @@ Generate full podcast episodes with realistic multi-voice conversations on ANY t
 - **🌐 Web Interface**: Beautiful, responsive web UI included
 - **💰 Cost Optimized**: L4 GPU, parallel processing, auto-scaling
 
-## Demo
+## Quick Start
 
-Try it out: Generate a podcast on topics like "Why everyone's ex looks exactly the same" or "The psychology of procrastination" and get a natural-sounding 3-person conversation.
+```bash
+# 1. Clone and setup
+git clone https://github.com/paarijat007/qwen3-tts-serverless.git
+cd qwen3-tts-serverless
+pip install modal
+modal setup
+
+# 2. Add your Grok API key
+modal secret create grok-api-key GROK_API_KEY=your-xai-key
+
+# 3. Deploy
+modal deploy app.py
+
+# 4. Open the URL Modal gives you
+# Example: https://yourname--aiden-webrtc-tts-web.modal.run
+```
+
+Generate podcasts on any topic: "Why everyone's ex looks exactly the same", "The psychology of procrastination", etc.
 
 ## How It Works
 
@@ -38,38 +55,30 @@ User Topic → Grok AI Script → Parse Segments → Parallel TTS → Assembly �
 
 ### Prerequisites
 
-- [Modal account](https://modal.com) (free tier works)
-- [Grok API key](https://x.ai)
+- [Modal account](https://modal.com) - Free tier available (requires credit card for GPU access)
+- [Grok API key](https://x.ai) - Get from x.ai (~$5/1M tokens)
 - Python 3.11+
 
-### Setup
+### Setup (5 minutes)
 
-1. Clone the repository:
+1. **Clone the repository**:
 ```bash
-git clone https://github.com/yourusername/ai-podcast-generator.git
-cd ai-podcast-generator
+git clone https://github.com/paarijat007/qwen3-tts-serverless.git
+cd qwen3-tts-serverless
 ```
 
-2. Install Modal:
+2. **Install and configure Modal**:
 ```bash
 pip install modal
+modal setup  # Follow prompts to authenticate
 ```
 
-3. Configure Modal:
+3. **Create Modal secret with your Grok API key**:
 ```bash
-modal setup
+modal secret create grok-api-key GROK_API_KEY=your-xai-api-key-here
 ```
 
-4. Set up your Grok API key:
-```bash
-modal secret create grok-api-key GROK_API_KEY=your-api-key-here
-```
-
-Or create a `.env` file:
-```bash
-cp .env.example .env
-# Edit .env and add your GROK_API_KEY
-```
+That's it! You're ready to deploy.
 
 ## Usage
 

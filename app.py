@@ -219,7 +219,7 @@ class TTSAudioTrack(AudioStreamTrack):
 @app.function(
     image=image,
     timeout=600,
-    secrets=[modal.Secret.from_dotenv()]  # Load .env file as secrets
+    secrets=[modal.Secret.from_name("grok-api-key")]  # Create this with: modal secret create grok-api-key GROK_API_KEY=your-key
 )
 @modal.asgi_app()
 def web():
