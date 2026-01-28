@@ -15,19 +15,23 @@ Generate full podcast episodes with realistic multi-voice conversations on ANY t
 ## Quick Start
 
 ```bash
-# 1. Clone and setup
+# 1. Clone and setup environment
 git clone https://github.com/paarijat007/qwen3-tts-serverless.git
 cd qwen3-tts-serverless
-pip install modal
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 2. Configure Modal
 modal setup
 
-# 2. Add your Grok API key
+# 3. Add your Grok API key
 modal secret create grok-api-key GROK_API_KEY=your-xai-key
 
-# 3. Deploy
+# 4. Deploy
 modal deploy app.py
 
-# 4. Open the URL Modal gives you
+# 5. Open the URL Modal gives you
 # Example: https://yourname--aiden-webrtc-tts-web.modal.run
 ```
 
@@ -67,13 +71,19 @@ git clone https://github.com/paarijat007/qwen3-tts-serverless.git
 cd qwen3-tts-serverless
 ```
 
-2. **Install and configure Modal**:
+2. **Create virtual environment and install dependencies**:
 ```bash
-pip install modal
-modal setup  # Follow prompts to authenticate
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
 ```
 
-3. **Create Modal secret with your Grok API key**:
+3. **Configure Modal**:
+```bash
+modal setup  # Follow prompts to authenticate with your Modal account
+```
+
+4. **Create Modal secret with your Grok API key**:
 ```bash
 modal secret create grok-api-key GROK_API_KEY=your-xai-api-key-here
 ```

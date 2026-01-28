@@ -1,0 +1,16 @@
+# Core dependencies for local development
+modal>=0.63.0
+python-dotenv>=1.0.0
+
+# Note: The following are installed in the Modal container image (app.py):
+# - torch
+# - transformers
+# - accelerate
+# - soundfile
+# - numpy
+# - scipy
+# - aiortc
+# - av
+# - fastapi[standard]
+# - qwen-tts
+# - openai
