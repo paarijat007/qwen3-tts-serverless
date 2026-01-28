@@ -3,9 +3,10 @@ import asyncio
 import numpy as np
 
 from fastapi import FastAPI
-from aiortc import RTCPeerConnection, RTCSessionDescription, RTCConfiguration, RTCIceServer
-from aiortc.mediastreams import AudioStreamTrack
 from fastapi.middleware.cors import CORSMiddleware
+
+# aiortc imports moved inside functions to avoid local dependency issues
+# (only used in experimental WebRTC endpoints)
 
 # ------------------------
 # Modal setup
@@ -137,27 +138,31 @@ class TTS:
 
 
 # ------------------------
-# WebRTC Audio Track
+# WebRTC Audio Track (Experimental - only used in /offer endpoint)
 # ------------------------
 
-class TTSAudioTrack(AudioStreamTrack):
-    kind = "audio"
+def get_tts_audio_track_class():
+    """Lazy load TTSAudioTrack to avoid importing aiortc at module level"""
+    from aiortc.mediastreams import AudioStreamTrack
 
-    def __init__(self, tts, text):
-        super().__init__()
-        import av
-        import re
-        from scipy import signal
+    class TTSAudioTrack(AudioStreamTrack):
+        kind = "audio"
 
-        self.signal = signal
-        self.av = av
-        self.queue = asyncio.Queue()
-        self.tts = tts
-        self.text = text
-        self.started = False
+        def __init__(self, tts, text):
+            super().__init__()
+            import av
+            import re
+            from scipy import signal
 
-        # Split text into sentences for streaming
-        self.sentences = re.split(r'(?<=[.!?])\s+', text)
+            self.signal = signal
+            self.av = av
+            self.queue = asyncio.Queue()
+            self.tts = tts
+            self.text = text
+            self.started = False
+
+            # Split text into sentences for streaming
+            self.sentences = re.split(r'(?<=[.!?])\s+', text)
 
     async def _run(self):
         try:
@@ -210,6 +215,8 @@ class TTSAudioTrack(AudioStreamTrack):
         aframe = self.av.AudioFrame.from_ndarray(frame, format="flt", layout="mono")
         aframe.sample_rate = 48000
         return aframe
+
+    return TTSAudioTrack
 
 
 # ------------------------
@@ -939,6 +946,9 @@ Write 12-15 exchanges (short turns) now:"""
 
     @api.post("/offer")
     async def offer(data: dict):
+        # Import aiortc only when this endpoint is used (experimental)
+        from aiortc import RTCPeerConnection, RTCSessionDescription
+
         # No ICE servers - use host candidates only
         pc = RTCPeerConnection()
         pcs.add(pc)
@@ -984,6 +994,7 @@ Write 12-15 exchanges (short turns) now:"""
 
         # Then add the track
         print(f"Creating audio track with text: {data['text'][:50]}...")
+        TTSAudioTrack = get_tts_audio_track_class()
         track = TTSAudioTrack(tts, data["text"])
         sender = pc.addTrack(track)
         print(f"Track added to peer connection, sender: {sender}")
