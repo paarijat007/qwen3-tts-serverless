@@ -1,12 +1,181 @@
 import modal
 import asyncio
 import numpy as np
+import re
+import random
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 # aiortc imports moved inside functions to avoid local dependency issues
 # (only used in experimental WebRTC endpoints)
+
+
+# ------------------------
+# Human Realism Text Preprocessing
+# ------------------------
+
+def add_natural_speech_patterns(text: str, speaker: str = "HOST") -> str:
+    """
+    Add micro-level human speech patterns to text before TTS generation.
+    This makes the model generate more realistic, imperfect human speech.
+    """
+
+    # Remove existing artificial markers
+    text = text.replace('[laughs]', '').replace('[chuckles]', '').replace('[excited]', '')
+    text = text.replace('[nervous]', '').replace('[serious]', '').strip()
+
+    # Speaker-specific patterns
+    if speaker == "HOST":
+        # Joe Rogan style - curious, reactive
+        filler_phrases = [
+            ("really", "wait really"),
+            ("interesting", "that's interesting"),
+            ("I think", "I mean I think"),
+            ("that's", "man that's"),
+            ("wild", "that's wild"),
+        ]
+        breath_before = ["Wait", "Whoa", "So", "But"]
+
+    elif speaker == "EXPERT":
+        # Thoughtful, measured
+        filler_phrases = [
+            ("actually", "it's actually"),
+            ("I think", "you know I think"),
+            ("important", "really important"),
+            ("basically", "so basically"),
+        ]
+        breath_before = ["Now", "Well", "So", "And"]
+
+    elif speaker == "COMEDIAN":
+        # Quick wit with pauses for effect
+        filler_phrases = [
+            ("like", "it's like"),
+            ("right", "right?"),
+            ("I mean", "I mean come on"),
+            ("but", "but like"),
+        ]
+        breath_before = ["Wait", "Okay", "So", "But", "Dude"]
+
+    else:
+        # Default patterns
+        filler_phrases = [
+            ("I think", "I mean I think"),
+            ("really", "really"),
+        ]
+        breath_before = ["Well", "So", "Now"]
+
+    # Add breaths before emotional or emphatic starts (25% chance)
+    for phrase in breath_before:
+        if random.random() < 0.25:
+            text = text.replace(f" {phrase} ", f" ... {phrase} ")
+            text = text.replace(f"{phrase} ", f"... {phrase} ")
+
+    # Add natural filler words (30% chance)
+    for original, replacement in filler_phrases:
+        if random.random() < 0.3 and original in text:
+            text = text.replace(original, replacement, 1)  # Only first occurrence
+
+    # Add micro-pauses before important/emphatic words (20% chance)
+    emphasis_words = ["really", "never", "always", "exactly", "totally", "completely", "definitely"]
+    for word in emphasis_words:
+        if random.random() < 0.2 and f" {word} " in text.lower():
+            text = re.sub(f" {word} ", f" .. {word} ", text, count=1, flags=re.IGNORECASE)
+
+    # Add slight hesitation on complex words (15% chance)
+    complex_patterns = [
+        r'\b\w{12,}\b',  # Long words (12+ chars)
+    ]
+    for pattern in complex_patterns:
+        matches = list(re.finditer(pattern, text))
+        if matches and random.random() < 0.15:
+            match = random.choice(matches)
+            word = match.group()
+            text = text[:match.start()] + ".. " + word + text[match.end():]
+
+    # Natural sentence-ending variations
+    # Sometimes breath after sentence (40% chance)
+    sentences = re.split(r'([.!?])\s+', text)
+    result = []
+    for i, part in enumerate(sentences):
+        result.append(part)
+        if part in '.!?' and i < len(sentences) - 1:
+            if random.random() < 0.4:
+                result.append(' ... ')
+            else:
+                result.append(' ')
+    text = ''.join(result)
+
+    # Clean up excessive spacing
+    text = re.sub(r'\s+', ' ', text)
+    text = re.sub(r'\s*\.\.\.\s*', '... ', text)
+    text = text.strip()
+
+    return text
+
+
+def add_audio_human_artifacts(audio: np.ndarray, sr: int, speaker: str = "HOST") -> np.ndarray:
+    """
+    Add micro-level acoustic imperfections that make synthesized speech sound human.
+    This simulates natural vocal cord instability, breath noise, and dynamic variations.
+    """
+
+    # Ensure audio is float32 and in range [-1, 1]
+    audio = audio.astype(np.float32)
+    audio = np.clip(audio, -1, 1)
+
+    # 1. PITCH MICRO-JITTER (simulates vocal cord instability)
+    # Real human vocal cords can't maintain perfectly stable pitch
+    # Add subtle random frequency modulation ±0.2-0.5% (2-5 cents)
+    jitter_amount = 0.003 if speaker == "COMEDIAN" else 0.002
+    jitter = np.random.randn(len(audio)) * jitter_amount
+    # Smooth the jitter (vocal cords don't change instantly)
+    from scipy.ndimage import gaussian_filter1d
+    jitter = gaussian_filter1d(jitter, sigma=sr*0.01)  # 10ms smoothing
+    audio = audio * (1 + jitter)
+
+    # 2. AMPLITUDE MICRO-VARIATIONS (simulates breath support variations)
+    # Human breath support isn't perfectly steady
+    amplitude_drift = np.random.randn(len(audio)) * 0.015
+    amplitude_drift = gaussian_filter1d(amplitude_drift, sigma=sr*0.05)  # 50ms smoothing
+    audio = audio * (1 + amplitude_drift)
+
+    # 3. ROOM TONE / BACKGROUND NOISE (very subtle)
+    # Even in quiet rooms, there's ambient noise and recording self-noise
+    room_tone = np.random.randn(len(audio)) * 0.0003  # Very quiet, -70dB
+    audio = audio + room_tone
+
+    # 4. VOCAL BREATHINESS (high-frequency noise component)
+    # Human voices have natural breathiness, especially on certain phonemes
+    breathiness = np.random.randn(len(audio)) * 0.001
+    # High-pass filter the breathiness (breath noise is high frequency)
+    from scipy.signal import butter, filtfilt
+    b, a = butter(2, 2000 / (sr / 2), btype='high')
+    breathiness = filtfilt(b, a, breathiness)
+    # Apply more on quieter sections (breath is more audible when not speaking loudly)
+    breath_envelope = 1 - np.abs(audio) * 0.5
+    audio = audio + breathiness * breath_envelope
+
+    # 5. SUBTLE COMPRESSION (humans don't have unlimited dynamic range)
+    # Simulates natural voice dynamics - loud parts slightly compressed
+    # This is what real human vocal anatomy does
+    audio = np.tanh(audio * 1.15) * 0.92
+
+    # 6. FORMANT MICRO-VARIATIONS (simulates tiny vocal tract changes)
+    # Real speakers have constant micro-movements of tongue, lips, jaw
+    # Add very subtle random spectral tilt variation
+    spectral_variation = np.random.randn(len(audio)) * 0.008
+    spectral_variation = gaussian_filter1d(spectral_variation, sigma=sr*0.02)
+    audio = audio * (1 + spectral_variation)
+
+    # 7. NATURAL CLIPPING PREVENTION WITH ORGANIC LIMITING
+    # Instead of hard clipping, soft-limit like human voice does
+    audio = np.tanh(audio * 0.95)
+
+    # Final normalization to -0.5 to 0.5 range (leaves headroom)
+    audio = audio * 0.5
+
+    return audio
 
 # ------------------------
 # Modal setup
@@ -41,59 +210,184 @@ image = (
 
 
 # ------------------------
-# Voice profiles for podcast cast (ULTRA NATURAL)
+# Voice profiles for podcast cast (HYPER-REALISTIC HUMAN)
 # ------------------------
 
 VOICE_HOST = """
-Incredibly smooth, warm male voice. Late 30s. Like butter - effortless and calming.
-Deep resonant tone but never forced. Natural bass that puts you at ease.
-Speaks with perfect pacing - never rushed, thoughtful pauses between ideas.
-Voice has rich texture, like aged whiskey. Comforting and magnetic.
-Expressive without being theatrical. Genuine curiosity that draws you in.
-Slight smile in the voice - you can hear he's enjoying the conversation.
-When excited: voice lifts naturally, authentic enthusiasm bubbles through.
-When serious: drops to intimate register, creates connection with listener.
-Breathes naturally, no artificial radio voice. Just a real human being present.
-The kind of voice you could listen to for hours. Hypnotic, engaging, alive.
-Think: prime Joe Rogan mixed with audiobook narrator calm.
+VOCAL PHYSIOLOGY:
+Male, late 30s. Fundamental frequency 95-110Hz with natural jitter ±3-8Hz per phoneme.
+Chest voice resonance dominant. Vocal tract length 16.5cm. Subglottal pressure varies naturally.
+
+MICRO-LEVEL REALISM:
+- Pitch instability: every vowel has 2-5Hz micro-fluctuations, never flat
+- Consonant attacks: soft, slightly breathy onset on p/t/k sounds
+- Vocal fry: occasional creaky voice on sentence-final words when relaxed
+- Aspiration: natural breathiness, especially after phrases longer than 8 words
+- Coarticulation: sounds naturally blend and influence each other
+
+PROSODIC NATURALNESS:
+- Speaking rate: 145-165 WPM but VARIES - speeds up when excited, slows for emphasis
+- Pauses: 200-400ms between clauses, 500-800ms between thoughts, never uniform
+- Rhythm: completely irregular, human imperfection in timing
+- Intonation: falls naturally at sentence ends, rises slightly on continuations
+- Stress: unpredictable emphasis - not every important word is stressed
+
+HUMAN IMPERFECTIONS:
+- Tiny hesitations before complex words (20-50ms)
+- Slight pitch drop when thinking or being serious
+- Occasional glottal stops between vowels
+- Breath sounds audible every 10-15 words - natural, not exaggerated
+- Minute timing inconsistencies - never robotic precision
+- Volume micro-variations within single words
+
+EMOTIONAL LEAKAGE:
+- Warmth bleeds through in relaxed larynx, open throat
+- Curiosity shows in slight pitch lift on questions (not exaggerated)
+- Enthusiasm: faster rate + 5-10Hz pitch increase + more dynamic range
+- Seriousness: slower rate + lower pitch + reduced pitch range
+- Engagement: forward resonance, slight smile in voice quality
+
+AVOID:
+- Perfect pitch stability (sounds synthetic)
+- Uniform rhythm or timing (sounds robotic)
+- Clean consonants (too crisp = fake)
+- Consistent loudness (humans vary constantly)
+- Theatrical delivery (we want real conversation)
+
+Think: Joe Rogan's natural curiosity + podcast intimacy + complete human imperfection.
 """
 
 VOICE_EXPERT = """
-Sophisticated female voice, early 40s. Smooth and articulate with natural grace.
-Rich, warm tone with subtle depth. Confident but never arrogant.
-Speaks clearly but with human rhythm - natural breathing, thoughtful pauses.
-Voice has silk-like quality when explaining concepts. Calming and intelligent.
-Expressive range: gets animated when passionate, softens when empathetic.
-Smile comes through in voice naturally. Feels like talking to a wise friend.
-Not stiff or academic - approachable expert who loves sharing knowledge.
-Slightly melodic cadence, flows beautifully. Easy to listen to for long periods.
-Voice has character and personality, not just information delivery.
+VOCAL PHYSIOLOGY:
+Female, early 40s. Fundamental frequency 180-210Hz with organic pitch variance ±4-10Hz.
+Mixed chest-head voice. Balanced resonance. Forward placement but not nasal.
+
+MICRO-LEVEL REALISM:
+- Pitch wanders naturally - never holds steady on sustained vowels
+- Breathiness varies: more breathy on intimate topics, clearer on factual points
+- Vocal onset: gentle, no hard glottal attacks
+- Formant transitions: smooth, natural tongue/lip movements reflected in sound
+- Occasional slight nasalization on continuant sounds (m, n, ng)
+
+PROSODIC NATURALNESS:
+- Speaking rate: 155-175 WPM, but modulates constantly
+- Pauses: varies 150-600ms, sometimes cuts pauses short in flowing speech
+- Rhythm: lilting, slightly melodic but NEVER sing-song or artificial
+- Sentence endings: gentle fall, not dramatic drops
+- Stress patterns: unexpected, human-like emphasis choices
+
+HUMAN IMPERFECTIONS:
+- Micro-stutters on occasional word onsets (barely perceptible)
+- Breath timing: sometimes mid-phrase if sentence runs long
+- Pitch drift: slowly rises or falls across long utterances
+- Slight de-voicing on word-final consonants when tired or relaxed
+- Inconsistent articulation precision - clearer on important points
+- Minute voice quality shifts: clearer → breathier → clearer
+
+EMOTIONAL LEAKAGE:
+- Passion: increased pitch range + faster rate + forward resonance
+- Empathy: softer tone + slower rate + warmer quality
+- Intellectual mode: slight increase in precision, but still natural
+- Confidence: steady tone but never rigid
+- Warmth: smile resonance, open throat, relaxed articulation
+
+AVOID:
+- Clinical academic delivery (too perfect)
+- Constant perfect enunciation (unrealistic)
+- Flat affect (humans are always emotionally present)
+- Predictable intonation patterns (boring and fake)
+- Radio announcer quality (too polished)
+
+Think: Intelligent friend explaining over coffee + natural imperfection + authentic engagement.
 """
 
 VOICE_COMEDIAN = """
-Smooth, witty male voice, late 20s. Sharp but never abrasive.
-Natural storyteller cadence. Knows how to build to a punchline effortlessly.
-Voice has playful energy but stays smooth. Talks with a grin you can hear.
-Expressive without being cartoonish. Real person who happens to be funny.
-Rhythm varies: quick wit when riffing, slows down for emphasis on jokes.
-Warm laugh that's contagious. Not forced comedy - natural charm.
-Slight casual rasp that adds character. Sounds like your funniest friend.
-Delivery is butter-smooth even when being ridiculous. Professional ease.
-Makes you smile just by how he says things. Effortlessly entertaining.
+VOCAL PHYSIOLOGY:
+Male, late 20s. Fundamental frequency 120-145Hz, but wide expressive range 90-200Hz.
+Relaxed vocal mechanism. Slight natural rasp/breathiness adds character.
+
+MICRO-LEVEL REALISM:
+- Pitch jumps: natural swoops and slides for emphasis, not theatrical
+- Vocal quality shifts: clear → breathy → slightly rough based on content
+- Timing micro-variations: holds vowels slightly longer for comic timing
+- Glottal fry: occasional creaky voice for effect or casual delivery
+- Dynamic range: whispers to full voice, but transitions are organic
+
+PROSODIC NATURALNESS:
+- Speaking rate: HIGHLY variable 130-200 WPM depending on comedic rhythm
+- Pauses: strategic but feel spontaneous, 100ms-1.5s range
+- Rhythm: syncopated, jazzy timing - unexpected beats
+- Punchlines: slight pause before + pitch/timing shift during
+- Setup vs delivery: rate changes, pitch changes, quality changes
+
+HUMAN IMPERFECTIONS:
+- Sometimes rushes through setups when excited
+- Occasional breaths in weird places (adds spontaneity)
+- Pitch control slightly loose - overshoots and corrects naturally
+- Volume varies constantly - louder on emphasis, quieter on asides
+- Articulation: crisp on punchlines, looser on casual remarks
+- False starts and self-corrections (feels unscripted)
+
+EMOTIONAL LEAKAGE:
+- Amusement at own jokes: smile in voice, slight laugh-quality
+- Building excitement: rate increases, pitch lifts, energy builds
+- Deadpan moments: flatter but never robotic, slight twinkle remains
+- Playfulness: bouncy intonation, lighter voice quality
+- Genuine reactions: spontaneous pitch jumps, timing breaks
+
+AVOID:
+- Standup comedian announcer voice (too performed)
+- Consistent energy level (humans fluctuate)
+- Perfect joke delivery every time (feels rehearsed)
+- No vocal mistakes or variations (too clean)
+- Forced enthusiasm (cringe)
+
+Think: Funniest friend at the bar + natural wit + completely unrehearsed + authentic human mess.
 """
 
 VOICE_NARRATOR = """
-Masterful storytelling voice. Male, 40s. Like the best audiobook narrator you've ever heard.
-Deep, rich tone with incredible warmth. Voice wraps around you like a blanket.
-Perfect pacing - never rushed, gives each word its moment to breathe.
-Expressive range is stunning: whispers for suspense, rises for excitement, softens for emotion.
-Voice has gravitas and weight. Commands attention effortlessly.
-Natural breathing creates rhythm. Pauses are powerful - silence speaks.
-When describing action: voice quickens, energy builds naturally.
-When describing emotion: voice becomes intimate, draws you in close.
-Smooth as aged scotch. No roughness unless the story calls for it.
-Hypnotic quality - you forget you're listening to AI. Just lost in the story.
-The voice that makes you pull over in the car because you can't stop listening.
+VOCAL PHYSIOLOGY:
+Male, 40s. Fundamental frequency 90-105Hz. Rich harmonic spectrum. Full chest resonance.
+Professional voice control but retains human qualities - not synthetic perfection.
+
+MICRO-LEVEL REALISM:
+- Sustained notes have subtle pitch drift ±2-6Hz (living breath support)
+- Consonants: precise but organic, not mechanical
+- Vowel quality: rich, slightly dark, but micro-variations in brightness
+- Subglottal pressure: natural variations create dynamic micro-changes
+- Formants: subtle shifts even within sustained phonemes
+
+PROSODIC NATURALNESS:
+- Speaking rate: 135-155 WPM, but dramatically varies for storytelling
+- Pauses: precisely placed but feel inevitable, 300ms-2s range
+- Rhythm: wavelike, building and releasing tension organically
+- Pitch contours: sweeping arcs but never predictable or repetitive
+- Dynamics: whisper to full voice with infinite gradations
+
+HUMAN IMPERFECTIONS:
+- Breath sounds: audible, natural part of phrasing (not hidden)
+- Slight vocal fatigue: tiny roughness on extended passages adds authenticity
+- Micro-timing variations: never metronomic, always slightly ahead or behind "perfect"
+- Pitch accuracy: aims for target but has human variance ±5-10Hz
+- Resonance shifts: slight changes in vocal tract shape during long passages
+- Energy varies: higher at story peaks, more intimate in quiet moments
+
+EMOTIONAL LEAKAGE:
+- Suspense: tighter voice, slightly tense quality, slower rate
+- Excitement: faster rate, higher pitch, more forward placement
+- Sadness: slower, lower, slightly breathy, reduced dynamics
+- Wonder: softer, more breath, gentle pitch rises
+- Authority: full voice, steady (but not rigid) pitch, clear articulation
+- Every emotion shows in voice quality, not just pitch/volume
+
+AVOID:
+- Audiobook AI perfection (too clean, obviously synthetic)
+- Unvarying resonance (real voices shift constantly)
+- Perfect breath control (humans need air)
+- Mechanical rhythm (destroys immersion)
+- Emotional detachment (narrator is human, stories affect them)
+
+Think: Greatest audiobook narrator alive + complete human vulnerability + voice that breathes and lives.
 """
 
 # ------------------------
@@ -124,17 +418,66 @@ class TTS:
         print("MODEL LOADED")
 
     @modal.method()
-    def generate(self, text: str, voice_style: str = VOICE_HOST):
+    def generate(self, text: str, voice_style: str = VOICE_HOST, speaker: str = "HOST"):
+        """
+        Generate ultra-realistic human speech with micro-level imperfections.
+
+        This method applies THREE layers of humanization:
+        1. Text preprocessing: Adds natural speech patterns (fillers, pauses, breaths)
+        2. Model generation: Uses high temperature + detailed prompts for variation
+        3. Audio post-processing: Adds acoustic micro-imperfections (pitch jitter, noise, dynamics)
+
+        Args:
+            text: The text to synthesize
+            voice_style: Detailed voice instruction prompt
+            speaker: Speaker type for humanization patterns (HOST/EXPERT/COMEDIAN/NARRATOR)
+        """
+        import numpy as np
+        from scipy.ndimage import gaussian_filter1d
+        from scipy.signal import butter, filtfilt
+
+        # LAYER 1: Text humanization
+        humanized_text = add_natural_speech_patterns(text, speaker)
+
+        # LAYER 2: Generate with speaker-tuned parameters for maximum naturalness
+        # Different speakers need different generation parameters
+        if speaker == "COMEDIAN":
+            # Comedian needs high variation for expressiveness
+            temp = 0.98
+            top_p = 0.96
+            rep_penalty = 1.2
+        elif speaker == "EXPERT":
+            # Expert is more measured but still natural
+            temp = 0.92
+            top_p = 0.94
+            rep_penalty = 1.15
+        elif speaker == "NARRATOR":
+            # Narrator needs controlled variation with rich dynamics
+            temp = 0.90
+            top_p = 0.93
+            rep_penalty = 1.1
+        else:  # HOST or default
+            # Host is naturally expressive and reactive
+            temp = 0.95
+            top_p = 0.95
+            rep_penalty = 1.15
+
         wavs, sr = self.model.generate_voice_design(
-            text=text,
+            text=humanized_text,
             instruct=voice_style,
             language="English",
-            temperature=0.9,  # High for natural expressiveness
-            max_new_tokens=1536,  # Reduced for faster generation
-            top_p=0.95,
-            repetition_penalty=1.1,  # Avoid robotic repetition
+            temperature=temp,
+            max_new_tokens=1536,
+            top_p=top_p,
+            repetition_penalty=rep_penalty,
         )
-        return wavs[0], sr
+
+        audio = wavs[0]
+
+        # LAYER 3: Acoustic humanization - add micro-level imperfections
+        audio = add_audio_human_artifacts(audio, sr, speaker)
+
+        return audio, sr
 
 
 # ------------------------
@@ -172,7 +515,7 @@ def get_tts_audio_track_class():
                     continue
 
                 print(f"Generating: {sentence[:50]}...")
-                audio, sr = await asyncio.to_thread(self.tts.generate.remote, sentence)
+                audio, sr = await asyncio.to_thread(self.tts.generate.remote, sentence, VOICE_HOST, "HOST")
 
                 print(f"Generated audio shape: {audio.shape}, sr: {sr}")
 
@@ -604,7 +947,8 @@ Write 12-15 exchanges (short turns) now:"""
                 audio, sr = await asyncio.to_thread(
                     tts.generate.remote,
                     text,
-                    voice_style
+                    voice_style,
+                    speaker  # Pass speaker for humanization
                 )
                 return audio, sr
 
@@ -615,19 +959,34 @@ Write 12-15 exchanges (short turns) now:"""
                 for i, (speaker, text) in enumerate(segments)
             ])
 
-            # Build final audio with pauses
+            # Build final audio with NATURAL VARIABLE pauses
             all_audio = []
             sample_rate = None
 
-            for audio, sr in results:
+            for i, (audio, sr) in enumerate(results):
                 if sample_rate is None:
                     sample_rate = sr
 
                 all_audio.append(audio)
 
-                # Add natural pause between speakers (0.7s)
-                pause = np.zeros(int(sr * 0.7))
-                all_audio.append(pause)
+                # Add VARIABLE natural pauses between speakers (0.5-1.0s)
+                # Humans don't pause uniformly - varies by context
+                # Shorter pauses within fast exchanges, longer when switching topics
+                if i < len(results) - 1:  # Don't add pause after last segment
+                    # Random pause duration with natural distribution
+                    pause_duration = np.random.uniform(0.5, 1.0)
+                    # Occasionally longer pause (10% chance) for topic shifts
+                    if random.random() < 0.1:
+                        pause_duration = np.random.uniform(1.2, 1.8)
+                    # Occasionally shorter pause (15% chance) for quick back-and-forth
+                    elif random.random() < 0.15:
+                        pause_duration = np.random.uniform(0.3, 0.5)
+
+                    pause = np.zeros(int(sr * pause_duration))
+                    # Add subtle room tone during pauses (not dead silence)
+                    room_ambience = np.random.randn(len(pause)) * 0.0002
+                    pause = pause + room_ambience
+                    all_audio.append(pause)
 
             # Concatenate all audio
             print(f"🎵 Combining audio...")
@@ -790,7 +1149,8 @@ Write 12-15 exchanges (short turns) now:"""
                 audio, sr = await asyncio.to_thread(
                     tts.generate.remote,
                     text,
-                    voice_style
+                    voice_style,
+                    speaker  # Pass speaker for humanization
                 )
                 return audio, sr
 
@@ -803,12 +1163,22 @@ Write 12-15 exchanges (short turns) now:"""
             all_audio = []
             sample_rate = None
 
-            for audio, sr in results:
+            for i, (audio, sr) in enumerate(results):
                 if sample_rate is None:
                     sample_rate = sr
                 all_audio.append(audio)
-                pause = np.zeros(int(sr * 0.7))
-                all_audio.append(pause)
+
+                # Variable natural pauses (same as audio endpoint)
+                if i < len(results) - 1:
+                    pause_duration = np.random.uniform(0.5, 1.0)
+                    if random.random() < 0.1:
+                        pause_duration = np.random.uniform(1.2, 1.8)
+                    elif random.random() < 0.15:
+                        pause_duration = np.random.uniform(0.3, 0.5)
+                    pause = np.zeros(int(sr * pause_duration))
+                    room_ambience = np.random.randn(len(pause)) * 0.0002
+                    pause = pause + room_ambience
+                    all_audio.append(pause)
 
             full_audio = np.concatenate(all_audio)
             duration = len(full_audio) / sample_rate
@@ -899,7 +1269,7 @@ Write 12-15 exchanges (short turns) now:"""
                 print(f"Generating {i+1}/{len(sentences)}: {sentence[:50]}...")
 
                 # Generate audio for this sentence with narrator voice
-                audio, sr = await asyncio.to_thread(tts.generate.remote, sentence, VOICE_NARRATOR)
+                audio, sr = await asyncio.to_thread(tts.generate.remote, sentence, VOICE_NARRATOR, "NARRATOR")
 
                 if sample_rate is None:
                     sample_rate = sr
